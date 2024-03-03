@@ -14,15 +14,12 @@
  * limitations under the License.
  *
  */
-
 #import "NotifeeCoreUtil.h"
 #include <CoreGraphics/CGGeometry.h>
 #import <Intents/INIntentIdentifiers.h>
 #import <UIKit/UIKit.h>
 #import "NotifeeCore+NSURLSession.h"
-
 @implementation NotifeeCoreUtil
-
 + (NSNumber *)numberForUNNotificationSetting:(UNNotificationSetting)setting {
   NSNumber *asNumber = @-1;
   if (setting == UNNotificationSettingNotSupported) {
@@ -34,24 +31,19 @@
   }
   return asNumber;
 }
-
 + (NSMutableArray<NSDictionary *> *)notificationActionsToDictionaryArray:
     (NSArray<UNNotificationAction *> *)notificationActions {
   NSMutableArray<NSDictionary *> *notificationActionDicts = [[NSMutableArray alloc] init];
-
   for (UNNotificationAction *notificationAction in notificationActions) {
     NSMutableDictionary *notificationActionDict = [NSMutableDictionary dictionary];
-
     notificationActionDict[@"id"] = notificationAction.identifier;
     notificationActionDict[@"title"] = notificationAction.title;
-
     notificationActionDict[@"destructive"] =
         @(((notificationAction.options & UNNotificationActionOptionDestructive) != 0));
     notificationActionDict[@"foreground"] =
         @(((notificationAction.options & UNNotificationActionOptionForeground) != 0));
     notificationActionDict[@"authenticationRequired"] =
         @(((notificationAction.options & UNNotificationActionOptionAuthenticationRequired) != 0));
-
     if ([[notificationAction class] isKindOfClass:[UNTextInputNotificationAction class]]) {
       UNTextInputNotificationAction *notificationInputAction =
           (UNTextInputNotificationAction *)notificationAction;
@@ -67,37 +59,27 @@
     } else {
       notificationActionDict[@"input"] = @(NO);
     }
-
     [notificationActionDicts addObject:notificationActionDict];
   }
-
   return notificationActionDicts;
 }
-
 + (NSMutableArray<UNNotificationAction *> *)notificationActionsFromDictionaryArray:
     (NSArray<NSDictionary *> *)actionDictionaries {
   NSMutableArray<UNNotificationAction *> *notificationActions = [[NSMutableArray alloc] init];
-
   for (NSDictionary *actionDictionary in actionDictionaries) {
     UNNotificationAction *notificationAction;
-
     NSString *id = actionDictionary[@"id"];
     NSString *title = actionDictionary[@"title"];
-
     UNNotificationActionOptions options = 0;
-
     if ([actionDictionary[@"destructive"] isEqual:@(YES)]) {
       options |= UNNotificationActionOptionDestructive;
     }
-
     if ([actionDictionary[@"foreground"] isEqual:@(YES)]) {
       options |= UNNotificationActionOptionForeground;
     }
-
     if ([actionDictionary[@"authenticationRequired"] isEqual:@(YES)]) {
       options |= UNNotificationActionOptionAuthenticationRequired;
     }
-
     if (actionDictionary[@"input"] != nil &&
         [actionDictionary[@"input"] isKindOfClass:NSDictionary.class]) {
       NSDictionary *inputDictionary = actionDictionary[@"input"];
@@ -117,13 +99,10 @@
                                                                 title:title
                                                               options:options];
     }
-
     [notificationActions addObject:notificationAction];
   }
-
   return notificationActions;
 }
-
 /**
  * Builds the notification attachments
  * If no attachments are resolved, an empty array will be returned
@@ -133,7 +112,6 @@
 + (NSMutableArray<UNNotificationAttachment *> *)notificationAttachmentsFromDictionaryArray:
     (NSArray<NSDictionary *> *)attachmentDictionaries {
   NSMutableArray<UNNotificationAttachment *> *attachments = [[NSMutableArray alloc] init];
-
   for (NSDictionary *attachmentDict in attachmentDictionaries) {
     UNNotificationAttachment *attachment = [self attachmentFromDictionary:attachmentDict];
     if (attachment) {
@@ -142,7 +120,6 @@
   }
   return attachments;
 }
-
 /**
  * Returns an UNNotificationAttachment from a file path or local resource
  *
@@ -151,9 +128,17 @@
 + (UNNotificationAttachment *)attachmentFromDictionary:(NSDictionary *)attachmentDict {
   NSString *identifier = attachmentDict[@"id"];
   NSString *urlString = attachmentDict[@"url"];
-
-  NSURL *url = [self getURLFromString:urlString];
-
+  NSURL *url;
+  if ([urlString hasPrefix:@"http://"] || [urlString hasPrefix:@"https://"]) {
+    // handle remote url by attempting to download attachement synchronously
+    url = [self downloadMediaSynchronously:urlString];
+  } else if ([urlString hasPrefix:@"/"]) {
+    // handle absolute file path
+    url = [NSURL fileURLWithPath:urlString];
+  } else {
+    // try to resolve local resource
+    url = [[NSBundle mainBundle] URLForResource:attachmentDict[@"url"] withExtension:nil];
+  }
   if (url) {
     NSError *error;
     UNNotificationAttachment *attachment = [UNNotificationAttachment
@@ -171,37 +156,11 @@
             @"not a supported type.",
             attachmentDict);
     }
-
     return attachment;
   }
-
   NSLog(@"NotifeeCore: Unable to resolve url for attachment: %@", attachmentDict);
   return nil;
 }
-
-/*
- * get the URL from a string
- *
- * @param urlString NSString
- * @return NSURL
- */
-+ (NSURL *)getURLFromString:(NSString *)urlString {
-  NSURL *url;
-
-  if ([urlString hasPrefix:@"http://"] || [urlString hasPrefix:@"https://"]) {
-    // handle remote url by attempting to download attachement synchronously
-    url = [self downloadMediaSynchronously:urlString];
-  } else if ([urlString hasPrefix:@"/"]) {
-    // handle absolute file path
-    url = [NSURL fileURLWithPath:urlString];
-  } else {
-    // try to resolve local resource
-    url = [[NSBundle mainBundle] URLForResource:urlString withExtension:nil];
-  }
-
-  return url;
-}
-
 /*
  * Downloads a media file, syncronously to the NSCachesDirectory
  *
@@ -210,48 +169,36 @@
  */
 + (NSURL *)downloadMediaSynchronously:(NSString *)urlString {
   NSURL *url = [NSURL URLWithString:urlString];
-
   NSString *newCachedFileName = [self generateCachedFileName:15];
-
   NSArray *localDirectoryPaths =
       NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
   NSString *tempDestination =
       [localDirectoryPaths[0] stringByAppendingPathComponent:newCachedFileName];
-
   @try {
     NSError *error;
-
     // Apple gives us a suggested file name which can be used to infer the file
     // extension
     NSString *suggestedFilename = [NotifeeCoreNSURLSession downloadItemAtURL:url
                                                                       toFile:tempDestination
                                                                        error:&error];
-
     if (error) {
       NSLog(@"NotifeeCore: Failed to download attachement with URL %@: %@", urlString, error);
       return nil;
     }
-
     // Rename the recently downloaded file to include its file extension
     NSFileManager *fileManager = [NSFileManager defaultManager];
-
     NSString *fileExtension = [NSString stringWithFormat:@".%@", [suggestedFilename pathExtension]];
-
     if (!fileExtension || [fileExtension isEqualToString:@""]) {
       NSLog(@"NotifeeCore: Failed to determine file extension for attachment "
             @"with URL %@: %@",
             urlString, error);
       return nil;
     }
-
     NSString *localFilePath =
         [localDirectoryPaths[0] stringByAppendingPathComponent:newCachedFileName];
-
     localFilePath = [localFilePath stringByAppendingString:fileExtension];
     NSURL *localURL = [NSURL fileURLWithPath:localFilePath];
-
     [fileManager moveItemAtPath:tempDestination toPath:localFilePath error:&error];
-
     // Returns the local cached path to attachment
     return localURL;
   } @catch (NSException *exception) {
@@ -262,7 +209,6 @@
     return nil;
   }
 }
-
 /**
  * Returns a NSDictionary representation of options related to the attached file
  *
@@ -273,11 +219,9 @@
   if (optionsDict[@"typeHint"] != nil) {
     options[UNNotificationAttachmentOptionsTypeHintKey] = optionsDict[@"typeHint"];
   }
-
   if (optionsDict[@"thumbnailHidden"] != nil) {
     options[UNNotificationAttachmentOptionsThumbnailHiddenKey] = optionsDict[@"thumbnailHidden"];
   }
-
   if (optionsDict[@"thumbnailClippingRect"] != nil) {
     NSDictionary *area = optionsDict[@"thumbnailClippingRect"];
     NSNumber *x = area[@"x"];
@@ -289,14 +233,11 @@
     options[UNNotificationAttachmentOptionsThumbnailClippingRectKey] =
         (__bridge id _Nullable)(CGRectCreateDictionaryRepresentation(areaRect));
   }
-
   if (optionsDict[@"thumbnailTime"] != nil) {
     options[UNNotificationAttachmentOptionsThumbnailTimeKey] = optionsDict[@"thumbnailTime"];
   }
-
   return options;
 }
-
 /**
  * Returns an UNNotificationTrigger from NSDictionary representing a trigger
  *
@@ -306,7 +247,6 @@
 + (UNNotificationTrigger *)triggerFromDictionary:(NSDictionary *)triggerDict {
   UNNotificationTrigger *trigger;
   NSInteger triggerType = [triggerDict[@"type"] integerValue];
-
   if (triggerType == NotifeeCoreTriggerTypeTimestamp) {
     trigger = [self timestampTriggerFromDictionary:triggerDict];
   } else if (triggerType == NotifeeCoreTriggerTypeInterval) {
@@ -315,10 +255,8 @@
     NSLog(@"NotifeeCore: Failed to parse trigger with unknown trigger type: %ld",
           (long)triggerType);
   }
-
   return trigger;
 }
-
 /**
  * Returns an UNNotificationTrigger from NSDictionary representing a
  * TimestampTrigger
@@ -329,17 +267,13 @@
   UNNotificationTrigger *trigger;
   Boolean repeats = false;
   NSCalendarUnit calendarUnit;
-
   NSInteger repeatFrequency = [triggerDict[@"repeatFrequency"] integerValue];
   NSNumber *timestampMillis = triggerDict[@"timestamp"];
-
   // convert timestamp to a NSDate
   NSInteger timestamp = [timestampMillis doubleValue] / 1000;
   NSDate *date = [NSDate dateWithTimeIntervalSince1970:timestamp];
-
   if (repeatFrequency != -1) {
     repeats = true;
-
     if (repeatFrequency == NotifeeCoreRepeatFrequencyHourly) {
       // match by minute and second
       calendarUnit = NSCalendarUnitMinute | NSCalendarUnitSecond;
@@ -354,7 +288,6 @@
       NSLog(@"NotifeeCore: Failed to parse TimestampTrigger with unknown "
             @"repeatFrequency: %ld",
             (long)repeatFrequency);
-
       return nil;
     }
   } else {
@@ -362,12 +295,10 @@
     calendarUnit = NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay |
                    NSCalendarUnitHour | NSCalendarUnitMinute | NSCalendarUnitSecond;
   }
-
   NSDateComponents *components = [[NSCalendar currentCalendar] components:calendarUnit
                                                                  fromDate:date];
   trigger = [UNCalendarNotificationTrigger triggerWithDateMatchingComponents:components
                                                                      repeats:repeats];
-
   return trigger;
 }
 /**
@@ -379,9 +310,7 @@
 + (UNNotificationTrigger *)intervalTriggerFromDictionary:(NSDictionary *)triggerDict {
   double intervalNumber = [triggerDict[@"interval"] doubleValue];
   NSString *timeUnit = triggerDict[@"timeUnit"];
-
   NSTimeInterval intervalInSeconds = 0;
-
   if ([timeUnit isEqualToString:kNotifeeCoreTimeUnitSeconds]) {
     intervalInSeconds = intervalNumber;
   } else if ([timeUnit isEqualToString:kNotifeeCoreTimeUnitMinutes]) {
@@ -399,14 +328,11 @@
           timeUnit);
     return nil;
   }
-
   return [UNTimeIntervalNotificationTrigger triggerWithTimeInterval:intervalInSeconds repeats:true];
 }
-
 + (NSMutableArray<NSNumber *> *)intentIdentifiersFromStringArray:
     (NSArray<NSString *> *)identifiers {
   NSMutableArray<NSNumber *> *intentIdentifiers = [[NSMutableArray alloc] init];
-
   for (NSString *identifier in identifiers) {
     if ([identifier isEqualToString:INStartAudioCallIntentIdentifier]) {
       // IOSIntentIdentifier.START_AUDIO_CALL
@@ -485,14 +411,11 @@
       [intentIdentifiers addObject:@24];
     }
   }
-
   return intentIdentifiers;
 }
-
 + (NSMutableArray<NSString *> *)intentIdentifiersFromNumberArray:
     (NSArray<NSNumber *> *)identifiers {
   NSMutableArray<NSString *> *intentIdentifiers = [[NSMutableArray alloc] init];
-
   for (NSNumber *identifier in identifiers) {
     if ([identifier isEqualToNumber:@0]) {
       // IOSIntentIdentifier.START_AUDIO_CALL
@@ -571,10 +494,8 @@
       [intentIdentifiers addObject:INGetRideStatusIntentIdentifier];
     }
   }
-
   return intentIdentifiers;
 }
-
 /**
  * Returns timestamp in millisecons
  *
@@ -583,97 +504,51 @@
 + (NSNumber *)convertToTimestamp:(NSDate *)date {
   return [NSNumber numberWithDouble:([date timeIntervalSince1970] * 1000)];
 }
-
 /**
  * Parse UNNotificationRequest to NSDictionary
  *
  * @param request UNNotificationRequest
  */
-+ (NSMutableDictionary *)parseUNNotificationRequest:(UNNotificationRequest *)request {
-  NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
-
-  dictionary = [self parseUNNotificationContent:request.content];
-  dictionary[@"id"] = request.identifier;
-
-  NSDictionary *userInfo = request.content.userInfo;
-
-  // Check for remote details
-  if ([request.trigger isKindOfClass:[UNPushNotificationTrigger class]]) {
-    NSMutableDictionary *remote = [NSMutableDictionary dictionary];
-
-    remote[@"messageId"] = userInfo[@"gcm.message_id"];
-    remote[@"senderId"] = userInfo[@"google.c.sender.id"];
-
-    if (userInfo[@"aps"] != nil) {
-      remote[@"mutableContent"] = userInfo[@"aps"][@"mutable-content"];
-      remote[@"contentAvailable"] = userInfo[@"aps"][@"content-available"];
-    }
-
-    dictionary[@"remote"] = remote;
-  }
-
-  dictionary[@"data"] = [self parseDataFromUserInfo:userInfo];
-
-  return dictionary;
-}
-
-+ (NSMutableDictionary *)parseDataFromUserInfo:(NSDictionary *)userInfo {
-  NSMutableDictionary *data = [[NSMutableDictionary alloc] init];
-  for (id key in userInfo) {
-    // build data dict from remaining keys but skip keys that shouldn't be included in data
-    if ([key isEqualToString:@"aps"] || [key hasPrefix:@"gcm."] || [key hasPrefix:@"google."] ||
-        // notifee or notifee_options
-        [key hasPrefix:@"notifee"] ||
-        // fcm_options
-        [key hasPrefix:@"fcm"]) {
-      continue;
-    }
-    data[key] = userInfo[key];
-  }
-
-  return data;
-}
-
-+ (NSMutableDictionary *)parseUNNotificationContent:(UNNotificationContent *)content {
++ (NSDictionary *)parseUNNotificationRequest:(UNNotificationRequest *)request {
   NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
   NSMutableDictionary *iosDict = [NSMutableDictionary dictionary];
 
+  dictionary[@"id"] = request.identifier;
+
+  UNNotificationContent *content = request.content;
+
   dictionary[@"subtitle"] = content.subtitle;
   dictionary[@"body"] = content.body;
-  dictionary[@"data"] = [content.userInfo mutableCopy];
 
+    
+  + (NSDictionary *)parseUNNotificationRequest:(UNNotificationRequest *)request {
+  
+  dictionary[@"data"] = [content.userInfo mutableCopy];
   // title
   if (content.title != nil) {
     dictionary[@"title"] = content.title;
   }
-
   // subtitle
   if (content.subtitle != nil) {
     dictionary[@"subtitle"] = content.subtitle;
   }
-
   // body
   if (content.body != nil) {
     dictionary[@"body"] = content.body;
   }
-
   iosDict[@"badgeCount"] = content.badge;
-
   // categoryId
   if (content.categoryIdentifier != nil) {
     iosDict[@"categoryId"] = content.categoryIdentifier;
   }
-
   // launchImageName
   if (content.launchImageName != nil) {
     iosDict[@"launchImageName"] = content.launchImageName;
   }
-
   // threadId
   if (content.threadIdentifier != nil) {
     iosDict[@"threadId"] = content.threadIdentifier;
   }
-
   // targetContentId
   if (@available(iOS 13.0, macOS 10.15, macCatalyst 13.0, tvOS 13.0, watchOS 6.0, *)) {
     if (content.targetContentIdentifier != nil) {
@@ -681,78 +556,22 @@
     }
   }
 
-  if (content.attachments != nil) {
-    // TODO: parse attachments
-  }
+  // TODO: parse sound
+  //  if (content.sound != nil) {
+  //    iosDict[@"sound"] = content.sound;
+  //  }
 
-  // sound
-  if (content.sound != nil) {
-    if ([content.sound isKindOfClass:[NSString class]]) {
-      iosDict[@"sound"] = content.sound;
-    } else if ([content.sound isKindOfClass:[NSDictionary class]]) {
-      NSDictionary *soundDict = content.sound;
-      NSMutableDictionary *notificationIOSSound = [[NSMutableDictionary alloc] init];
-
-      // ios.sound.name String
-      if (soundDict[@"name"] != nil) {
-        notificationIOSSound[@"name"] = soundDict[@"name"];
-      }
-
-      // sound.critical Boolean
-      if (soundDict[@"critical"] != nil) {
-        notificationIOSSound[@"critical"] = soundDict[@"critical"];
-      }
-
-      // ios.sound.volume Number
-      if (soundDict[@"volume"] != nil) {
-        notificationIOSSound[@"volume"] = soundDict[@"volume"];
-      }
-
-      // ios.sound
-      iosDict[@"sound"] = notificationIOSSound;
-    }
-  }
+  // TODO: parse attachments
+  //  if (content.attachments != nil) {
+  //    iosDict[@"attachments"] =
+  //        [NotifeeCoreUtil DictionaryArrayToNotificationAttachments:content.attachments];
+  //  }
 
   dictionary[@"ios"] = iosDict;
+
   return dictionary;
 }
 
-+ (INSendMessageIntent *)generateSenderIntentForCommunicationNotification:
-    (NSDictionary *)communicationInfo {
-  if (@available(iOS 15.0, *)) {
-    NSDictionary *sender = communicationInfo[@"sender"];
-    INPersonHandle *senderPersonHandle =
-        [[INPersonHandle alloc] initWithValue:sender[@"id"] type:INPersonHandleTypeUnknown];
-
-    // Parse sender's avatar
-    INImage *avatar = nil;
-    if (sender[@"avatar"] != nil) {
-      NSURL *url = [self getURLFromString:sender[@"avatar"]];
-      avatar = [INImage imageWithURL:url];
-    }
-
-    INPerson *senderPerson = [[INPerson alloc] initWithPersonHandle:senderPersonHandle
-                                                     nameComponents:nil
-                                                        displayName:sender[@"displayName"]
-                                                              image:avatar
-                                                  contactIdentifier:nil
-                                                   customIdentifier:nil];
-
-    INSendMessageIntent *intent =
-        [[INSendMessageIntent alloc] initWithRecipients:nil
-                                    outgoingMessageType:INOutgoingMessageTypeOutgoingMessageText
-                                                content:communicationInfo[@"body"]
-                                     speakableGroupName:nil
-                                 conversationIdentifier:communicationInfo[@"conversationId"]
-                                            serviceName:nil
-                                                 sender:senderPerson
-                                            attachments:nil];
-
-    return intent;
-  }
-
-  return nil;
-}
 /**
  * Returns a random string using UUID
  *
@@ -761,7 +580,6 @@
 + (NSString *)generateCachedFileName:(int)length {
   return [[NSUUID UUID] UUIDString];
 }
-
 /**
  * Returns a shared instance of [UIApplication sharedApplication]
  * Needed to prevent compile errors for App extensions when calling [UIApplication
@@ -780,13 +598,10 @@
         applicationClass = cls;
       }
     }
-
     sharedInstance = (NotifeeCoreUtil *)[applicationClass sharedApplication];
   });
-
   return sharedInstance;
 }
-
 /**
  * Checks if the current application is an extension
  */
@@ -798,5 +613,4 @@
   return NO;
 #endif
 }
-
 @end
